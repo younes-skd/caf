@@ -4,6 +4,7 @@ import requests
 from bs4 import BeautifulSoup
 from telegram import Bot
 
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")  # leave empty on first deploy
 
