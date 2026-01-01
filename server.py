@@ -4,22 +4,35 @@ import time
 import requests
 from bs4 import BeautifulSoup
 from flask import Flask, request
-from telegram import Bot, Update
-from telegram.ext import Dispatcher, CommandHandler
+
+from telegram import Update
+from telegram.ext import Application, CommandHandler
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")  # Leave empty initially
+CHAT_ID = os.getenv("CHAT_ID")  # Leave empty at first
+
 URL = "https://tickets.cafonline.com/fr"
 CHECK_INTERVAL = 120  # 2 minutes
 
-bot = Bot(BOT_TOKEN)
 app = Flask(__name__)
 
-dispatcher = Dispatcher(bot, None, workers=0)
+telegram_app = Application.builder().token(BOT_TOKEN).build()
+
+
+async def start(update: Update, context):
+    global CHAT_ID
+    CHAT_ID = str(update.effective_chat.id)
+    await update.message.reply_text("✅ Ticket alert activated!")
+    print("CHAT_ID =", CHAT_ID)
+
+
+telegram_app.add_handler(CommandHandler("start", start))
+
 
 def check_tickets():
-    """Runs in background to check ticket availability"""
+    """Runs in background every 2 minutes"""
     global CHAT_ID
+
     while True:
         try:
             resp = requests.get(URL, headers={"User-Agent": "Mozilla/5.0"})
@@ -29,8 +42,8 @@ def check_tickets():
             keywords = ["acheter", "buy", "tickets", "billets"]
 
             if any(k in text for k in keywords):
-                if CHAT_ID and CHAT_ID != "":
-                    bot.send_message(CHAT_ID, f"🔥🎟️ Tickets AVAILABLE!\n{URL}")
+                if CHAT_ID:
+                    telegram_app.bot.send_message(chat_id=CHAT_ID, text=f"🔥🎟️ Tickets AVAILABLE!\n{URL}")
                     time.sleep(3600)
         except Exception as e:
             print("Error:", e)
@@ -38,32 +51,28 @@ def check_tickets():
         time.sleep(CHECK_INTERVAL)
 
 
-def start(update: Update, context):
-    global CHAT_ID
-    CHAT_ID = str(update.message.chat.id)
-    bot.send_message(CHAT_ID, "✅ Ticket alert activated!")
-    print("CHAT_ID =", CHAT_ID)
-
-
-dispatcher.add_handler(CommandHandler("start", start))
-
-
-@app.route("/webhook", methods=["POST"])
+@app.post("/webhook")
 def webhook():
-    update = Update.de_json(request.get_json(force=True), bot)
-    dispatcher.process_update(update)
+    json_data = request.get_json(force=True)
+    update = Update.de_json(json_data, telegram_app.bot)
+    telegram_app.update_queue.put(update)
     return "OK"
 
 
-@app.route("/")
+@app.get("/")
 def home():
     return "Bot is running."
 
 
-# Launch background thread
+# Start background checker
 threading.Thread(target=check_tickets, daemon=True).start()
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # RAILWAY PORT
-    app.run(host="0.0.0.0", port=port)
+    telegram_app.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.getenv("PORT", 5000)),
+        url_path="/webhook",
+        webhook_url=f"{os.getenv('RAILWAY_PUBLIC_URL')}/webhook"
+    )
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
