@@ -8,9 +8,9 @@ from telegram import Bot, Update
 from telegram.ext import Dispatcher, CommandHandler
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")  # Set after first /start
+CHAT_ID = os.getenv("CHAT_ID")  # Leave empty initially
 URL = "https://tickets.cafonline.com/fr"
-CHECK_INTERVAL = 120  # seconds
+CHECK_INTERVAL = 120  # 2 minutes
 
 bot = Bot(BOT_TOKEN)
 app = Flask(__name__)
@@ -18,7 +18,7 @@ app = Flask(__name__)
 dispatcher = Dispatcher(bot, None, workers=0)
 
 def check_tickets():
-    """Checks ticket availability every 2 minutes"""
+    """Runs in background to check ticket availability"""
     global CHAT_ID
     while True:
         try:
@@ -29,7 +29,7 @@ def check_tickets():
             keywords = ["acheter", "buy", "tickets", "billets"]
 
             if any(k in text for k in keywords):
-                if CHAT_ID:
+                if CHAT_ID and CHAT_ID != "":
                     bot.send_message(CHAT_ID, f"🔥🎟️ Tickets AVAILABLE!\n{URL}")
                     time.sleep(3600)
         except Exception as e:
@@ -40,7 +40,7 @@ def check_tickets():
 
 def start(update: Update, context):
     global CHAT_ID
-    CHAT_ID = update.message.chat.id
+    CHAT_ID = str(update.message.chat.id)
     bot.send_message(CHAT_ID, "✅ Ticket alert activated!")
     print("CHAT_ID =", CHAT_ID)
 
@@ -48,21 +48,22 @@ def start(update: Update, context):
 dispatcher.add_handler(CommandHandler("start", start))
 
 
-@app.route(f"/webhook", methods=["POST"])
+@app.route("/webhook", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), bot)
     dispatcher.process_update(update)
     return "OK"
 
 
-# Start background thread on startup
+@app.route("/")
+def home():
+    return "Bot is running."
+
+
+# Launch background thread
 threading.Thread(target=check_tickets, daemon=True).start()
 
 
-@app.route("/")
-def home():
-    return "Bot running"
-
-
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    port = int(os.environ.get("PORT", 5000))  # RAILWAY PORT
+    app.run(host="0.0.0.0", port=port)
